@@ -1,0 +1,14 @@
+{
+  "width": 200,
+  "height": 200,
+  "visibility": 15,
+  "numberOfObstacles": 4,
+  "maxShots" : 2,
+  "shots" : 1,
+  "make" : "Sniper",
+  "obstacles": [
+    { "type": "bottomless", "x": 4, "y": 3 },
+    { "type": "lake", "x": 3, "y": 4 },
+    { "type": "mountain", "x": 7, "y": 1 }
+  ]
+}

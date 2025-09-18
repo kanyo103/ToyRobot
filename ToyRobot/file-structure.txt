@@ -1,0 +1,71 @@
+.
+├── config
+│   └── world-config.json
+├── file-structure.txt
+├── java-project-code-dump.txt
+├── pom.xml
+├── README.md
+└── src
+    ├── main
+    │   └── java
+    │       └── za
+    │           └── co
+    │               └── wethinkcode
+    │                   └── robots
+    │                       ├── client
+    │                       │   ├── ClientHandler.java
+    │                       │   └── Client.java
+    │                       ├── commands
+    │                       │   ├── BackCommand.java
+    │                       │   ├── CommandFactory.java
+    │                       │   ├── Command.java
+    │                       │   ├── CommandParser.java
+    │                       │   ├── DumpCommand.java
+    │                       │   ├── FireCommand.java
+    │                       │   ├── ForwardCommand.java
+    │                       │   ├── HelpCommand.java
+    │                       │   ├── LaunchCommand.java
+    │                       │   ├── LookCommand.java
+    │                       │   ├── ReloadCommand.java
+    │                       │   ├── RepairCommand.java
+    │                       │   ├── RobotsCommand.java
+    │                       │   ├── StateCommand.java
+    │                       │   └── TurnCommand.java
+    │                       └── server
+    │                           ├── MultiServer.java
+    │                           ├── robot
+    │                           │   ├── Robot.java
+    │                           │   └── RobotRegistry.java
+    │                           ├── Server.java
+    │                           └── world
+    │                               ├── obstacle
+    │                               │   ├── Bottomless.java
+    │                               │   ├── Lake.java
+    │                               │   ├── MountainObstacle.java
+    │                               │   ├── Obstacle.java
+    │                               │   └── Position.java
+    │                               ├── TextWorld.java
+    │                               ├── worldconfiguration
+    │                               │   ├── ConfigLoader.java
+    │                               │   ├── Visibility.java
+    │                               │   └── WorldConfig.java
+    │                               └── World.java
+    └── test
+        ├── java
+        │   └── za
+        │       └── co
+        │           └── wethinkcode
+        │               └── robots
+        │                   └── test
+        │                       ├── ClientHandlerTest.java
+        │                       ├── ClientTest.java
+        │                       ├── MultiServerTest.java
+        │                       ├── RobotTest.java
+        │                       └── WorldTest.java
+        └── resources
+            ├── junit-platform.properties
+            └── META-INF
+                └── services
+                    └── org.junit.jupiter.api.extension.Extension
+
+25 directories, 43 files

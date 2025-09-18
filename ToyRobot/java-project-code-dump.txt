@@ -1,0 +1,2289 @@
+=== FILE TREE (excluding target) ===
+here i = 4, n = 5
+
+----- FILE: ./src/test/java/za/co/wethinkcode/robots/test/RobotTest.java -----
+package za.co.wethinkcode.robots.test;
+
+
+import static org.junit.Assert.assertEquals;
+
+import org.junit.Before;
+import org.junit.Test;
+
+public class RobotTest {
+
+    private Robot robot;
+
+    // This method will run before each test, initializing the Robot instance.
+    @Before
+    public void setUp() {
+        World world = null;
+        robot = new Robot("Robo1", world);
+    }
+
+    // Test the constructor and getName() method.
+    @Test
+    public void testGetName() {
+        assertEquals("Robo1", robot.getName());
+    }
+
+    // Test the getStatus() method. The robot's initial position should be (0, 0) and direction "NORTH".
+    @Test
+    public void testGetStatus() {
+        String expectedStatus = "Robo1 at (0,0) facing NORTH";
+        assertEquals(expectedStatus, robot.getStatus());
+    }
+}
+
+----- FILE: ./src/test/java/za/co/wethinkcode/robots/test/ClientTest.java -----
+package za.co.wethinkcode.robots.test;
+
+import org.junit.jupiter.api.Test;
+import za.co.wethinkcode.robots.client.Client;
+
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+public class ClientTest {
+
+
+    @Test
+    void testClientServerCommunication() throws Exception {
+        int port = 5000;
+
+        // Start mock server in a new thread
+        Thread serverThread = new Thread(() -> {
+            try (ServerSocket serverSocket = new ServerSocket(port);
+                 Socket clientSocket = serverSocket.accept();
+                 PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                 BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+
+                out.println("Welcome to the Robot Server!");
+
+                String input;
+                while ((input = in.readLine()) != null) {
+                    if ("quit".equalsIgnoreCase(input)) {
+                        break;
+                    }
+                    out.println("Echo: " + input);
+                }
+
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        serverThread.start();
+
+        // Give the server time to start
+        Thread.sleep(200);
+
+        // Redirect user input and output
+        ByteArrayInputStream input = new ByteArrayInputStream("hello\nquit\n".getBytes());
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        System.setIn(input);
+        System.setOut(new PrintStream(output));
+
+        // Run the client
+        Client.main(new String[]{});
+
+        String consoleOutput = output.toString();
+        assertTrue(consoleOutput.contains("Welcome to the Robot Server!"));
+        assertTrue(consoleOutput.contains("Echo: hello"));
+    }
+}
+
+----- FILE: ./src/test/java/za/co/wethinkcode/robots/test/ClientHandlerTest.java -----
+package za.co.wethinkcode.robots.test;
+
+import org.junit.jupiter.api.Test;
+import za.co.wethinkcode.robots.client.ClientHandler;
+import za.co.wethinkcode.robots.server.robot.Robot;
+
+import java.io.*;
+import java.net.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+public class ClientHandlerTest {
+
+    @Test
+    public void testHandleStateCommand() throws IOException, InterruptedException {
+        // Setup a dummy world and robot
+        World world = new World(10, 10);  // you must have a constructor like this
+        Robot robot = new Robot("TestBot", world);  // constructor: Robot(String, World)
+        ConcurrentHashMap<String, Robot> robots = new ConcurrentHashMap<>();
+
+        ServerSocket serverSocket = new ServerSocket(0); // dynamic free port
+        int port = serverSocket.getLocalPort();
+
+        // Start ClientHandler in a thread
+        new Thread(() -> {
+            try {
+                Socket serverSideSocket = serverSocket.accept();
+                ClientHandler handler = new ClientHandler(serverSideSocket, robot, world, robots);
+                handler.run();  // run in this thread for simplicity
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
+
+        // Create the client side
+        Socket clientSocket = new Socket("localhost", port);
+        BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        PrintStream out = new PrintStream(clientSocket.getOutputStream());
+
+        // Read welcome message
+        String welcome = in.readLine();
+        System.out.println("Welcome: " + welcome);
+        assertTrue(welcome.contains("connected"));
+
+        // Send command
+        out.println("state");
+        out.flush();
+
+        // Read response
+        String response = in.readLine();
+        System.out.println("State response: " + response);
+        assertTrue(response.contains("TestBot"));  // assuming status includes robot name
+
+        // Quit
+        out.println("quit");
+        out.flush();
+
+        // Sleep briefly to ensure the "Goodbye" message is sent
+        Thread.sleep(100);  // Sleep for 100 milliseconds to give the server time to send the message
+
+        // Read goodbye message
+        String goodbye = in.readLine();
+        System.out.println("Goodbye: " + goodbye);
+
+        // Check if the goodbye message is correctly received
+        assertFalse(goodbye != null && goodbye.contains("Goodbye"));
+
+        // Cleanup
+        clientSocket.close();
+        serverSocket.close();
+    }
+}
+
+
+----- FILE: ./src/test/java/za/co/wethinkcode/robots/test/MultiServerTest.java -----
+package za.co.wethinkcode.robots.test;
+
+import org.junit.jupiter.api.*;
+import za.co.wethinkcode.robots.server.MultiServer;
+
+import java.awt.*;
+import java.io.*;
+import java.net.Socket;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class MultiServerTest {
+
+    private MultiServer server;
+    private Thread serverThread;
+
+    @BeforeEach
+    void setUp() {
+        server = new MultiServer();
+        serverThread = new Thread(() -> {
+            try {
+                server.start();
+            } catch (IOException e) {
+                // Server might stop during test, that's fine
+            }
+        });
+        serverThread.start();
+
+        try {
+            Thread.sleep(300); // Let server start
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @AfterEach
+    void tearDown() {
+        server.stop();
+        try {
+            serverThread.join(1000); // wait for thread to stop
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Test
+    void testRobotIsRegisteredAfterConnection() throws IOException {
+        Socket clientSocket = new Socket("localhost", MultiServer.PORT);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true);
+
+        String prompt = reader.readLine();
+        assertTrue(prompt.contains("Enter your robot's name"));
+
+        String testRobotName = "TestBot123";
+        writer.println(testRobotName);
+
+        try {
+            Thread.sleep(200); // Let server register robot
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+        ConcurrentHashMap<String, Robot> robots = MultiServer.getRobots();
+        assertTrue(robots.containsKey(testRobotName));
+        assertEquals(testRobotName, robots.get(testRobotName).getName());
+
+        clientSocket.close();
+    }
+}
+
+
+----- FILE: ./src/test/java/za/co/wethinkcode/robots/test/WorldTest.java -----
+package za.co.wethinkcode.robots.test;
+
+import org.junit.Test;
+
+import java.awt.*;
+import java.util.Set;
+
+import static org.junit.Assert.*;
+public class WorldTest {
+    @Test
+    public void testWorldConstruction() {
+        World world = new World(100, 100);
+        assertNotNull(world);
+    }
+    @Test
+    public void testGetWidth() {
+        World world = new World(100, 100);
+        assertEquals(10, world.getWidth());
+    }
+    @Test
+    public void testGetHeight() {
+        World world = new World(100, 100);
+        assertEquals(10, world.getHeight());
+    }
+    @Test
+    public void testGetObstacles() {
+        World world = new World(100, 100);
+        Set<Point> obstacles = world.getObstacles();
+        assertNotNull(obstacles);
+        assertEquals(1, obstacles.size());
+        assertTrue(obstacles.contains(new Point(5, 5)));
+    }
+    @Test
+    public void testObstacleUniqueness() {
+        World world = new World(100, 100);
+        Set<Point> obstacles = world.getObstacles();
+        Point newObstacle = new Point(5, 5);
+        assertFalse(obstacles.add(newObstacle));
+        assertEquals(1, obstacles.size());
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/World.java -----
+package za.co.wethinkcode.robots.server.world;
+
+import za.co.wethinkcode.robots.server.world.obstacle.*;
+import za.co.wethinkcode.robots.server.world.worldconfiguration.WorldConfig;
+import za.co.wethinkcode.robots.server.world.worldconfiguration.ConfigLoader;
+import za.co.wethinkcode.robots.server.world.worldconfiguration.Visibility;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import java.io.IOException;
+import java.util.*;
+
+public class World {
+    private final int width;
+    private final int height;
+    private final int repairTime;
+    private final int reloadTime;
+    private final int maxShieldStrength;
+    private final Set<Obstacle> obstacles = new HashSet<>();
+    private final Visibility visibilitySystem;
+    private final Random random = new Random();
+    private final String make;
+
+    private final Map<Position, Robot> robots = new HashMap<>(); // Tracks robots by position
+
+    public World(String configFilePath) {
+        try {
+            WorldConfig config = ConfigLoader.loadWorldConfig(configFilePath);
+            this.width = config.getWidth();
+            this.height = config.getHeight();
+            this.visibilitySystem = new Visibility(config.getVisibility());
+            this.reloadTime = config.getReloadTime();
+            this.maxShieldStrength = config.getMaxShieldStrength();
+            this.repairTime = config.getRepairTime();
+            this.make = config.getMake();
+
+            generateObstacles(config.getNumberOfObstacles());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load world config: " + e.getMessage());
+        }
+    }
+
+    private void generateObstacles(int numberOfObstacles) {
+        for (int i = 0; i < numberOfObstacles; i++) {
+            int x = random.nextInt(width);
+            int y = random.nextInt(height);
+            Obstacle obstacle = generateRandomObstacle(x, y);
+
+            while (isOverlapping(obstacle)) {
+                x = random.nextInt(width);
+                y = random.nextInt(height);
+                obstacle = generateRandomObstacle(x, y);
+            }
+
+            obstacles.add(obstacle);
+        }
+    }
+
+    private Obstacle generateRandomObstacle(int x, int y) {
+        int type = random.nextInt(3);
+        return switch (type) {
+            case 0 -> new Bottomless(x, y);
+            case 1 -> new Lake(x, y);
+            default -> new MountainObstacle(x, y);
+        };
+    }
+
+    private boolean isOverlapping(Obstacle newObs) {
+        for (Obstacle obs : obstacles) {
+            if (obs.blocksPosition(newObs.getPos(), newObs.getPos())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ===== NEW METHODS FOR MOVEMENT VALIDATION =====
+
+    public boolean isInsideWorld(Position pos) {
+        return pos.getX() >= 0 && pos.getX() < width &&
+                pos.getY() >= 0 && pos.getY() < height;
+    }
+
+    public boolean isPositionBlocked(Position pos) {
+        for (Obstacle obstacle : obstacles) {
+            if (obstacle.blocksPosition(pos, pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ===== ROBOT MANAGEMENT =====
+
+    // Add a robot to the world at a specific position
+    public boolean addRobot(Robot robot) {
+        Position position = robot.getCurrentPosition();
+        if (!isInsideWorld(position) || isPositionBlocked(position)) {
+            return false; // Can't add robot if position is blocked or out of bounds
+        }
+        robots.put(position, robot);
+        return true;
+    }
+
+    // Get a robot at a specific position
+    public Robot getRobotAt(Position position) {
+        return robots.get(position);
+    }
+
+    // Remove a robot from the world
+    public boolean removeRobot(Robot robot) {
+        return robots.remove(robot.getCurrentPosition(), robot);
+    }
+
+    // ===== GETTERS =====
+
+    public Map<String, List<Obstacle>> getVisibleObstacles(Position pos) {
+        return visibilitySystem.getVisibleObstacles(pos, obstacles);
+    }
+
+    public Set<Obstacle> getObstacles() {
+        return obstacles;
+    }
+
+    public int getWidth() {
+        return width;
+    }
+
+    public int getHeight() {
+        return height;
+    }
+
+    public int getRepairTime() {
+        return repairTime;
+    }
+
+    public int getReloadTime() {
+        return reloadTime;
+    }
+
+    public int getMaxShieldStrength() {
+        return maxShieldStrength;
+    }
+
+    public Position findFreePosition() {
+        return null;
+    }
+
+    public Object getVisibility() {
+        return null;
+    }
+
+    public String getMake() {
+        return "";
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/TextWorld.java -----
+package za.co.wethinkcode.robots.server.world;
+
+public class TextWorld {
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/obstacle/Obstacle.java -----
+//package za.co.wethinkcode.robots.server;
+//
+//public class Obstacle {
+//}
+
+package za.co.wethinkcode.robots.server.world.obstacle;
+
+public abstract class Obstacle {
+    Position pos;
+    int size;
+    public String name;
+
+    public Obstacle(int size, Position pos, String name) {
+        this.size = size;
+        this.pos = pos;
+        this.name = name;
+    }
+
+    public int getBottomLeftX(){
+        return pos.getX();
+    }
+
+    public int getBottomLeftY(){
+        return pos.getY();
+    }
+
+    int getSize(){
+        return this.size;
+    }
+
+    public boolean blocksPosition(Position a, Position b){
+        if (a.getX() >= pos.getX() && a.getX() < pos.getX() + size && a.getY() >= pos.getY() + size) {
+            return b.getX() >= pos.getX() && b.getX() < pos.getX() + size && b.getY() < pos.getY();
+        } else if (a.getX() >= pos.getX() && a.getX() < pos.getX() + size && a.getY() < pos.getY()) {
+            return b.getX() >= pos.getX() && b.getX() < pos.getX() + size && b.getY() >= pos.getY() + size;
+        } else if (a.getY() >= pos.getY() && a.getY() < pos.getY() + size && a.getX() < pos.getX()) {
+            return b.getY() >= pos.getY() && b.getY() < pos.getY() + size && b.getX() >= pos.getX() + size;
+        } else if (a.getY() >= pos.getY() && a.getY() < pos.getY() + size && a.getX() >= pos.getX() + size) {
+            return b.getY() >= pos.getY() && b.getY() < pos.getY() + size && b.getX() < pos.getX();
+        }
+        return false;
+    }
+
+    public boolean blocksPath(Position position){
+        return position.getY() >= getBottomLeftY() && position.getY() < getBottomLeftY() + size
+                && position.getX() >= getBottomLeftX() && position.getX() < getBottomLeftX() + size;
+    }
+
+    public String toString(){
+        return this.name + " at (" + getBottomLeftX() + "," + getBottomLeftY() + ")";
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public abstract Position getPos();
+
+    public abstract boolean isBottomless();
+}
+
+
+
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/obstacle/Lake.java -----
+//package za.co.wethinkcode.robots.server;
+//
+//public class Lake {
+//}
+
+//import robotworld.server.world.Position;
+
+
+//package za.co.wethinkcode.robots.server;
+//
+//public class Lake extends Obstacle{
+//
+//    public Lake(int x, int y) {
+//        super(8, new Position(x, y), "Lake");
+//    }
+//
+//    @Override
+//    public int getSize() {
+//        return this.size;
+//    }
+//
+//    @Override
+//    public int getBottomLeftX() {
+//        return pos.getX();
+//    }
+//
+//    @Override
+//    public int getBottomLeftY() {
+//        return pos.getY();
+//    }
+//
+//    public Position getPos() {
+//        return pos;
+//    }
+//
+//    public boolean isBottomless(){
+//        return false;
+//    }
+//}
+
+package za.co.wethinkcode.robots.server.world.obstacle;
+
+public class Lake extends Obstacle {
+
+    private static final int LAKE_SIZE = 8;
+    private static final String TYPE = "Lake";
+
+    public Lake(int x, int y) {
+        super(LAKE_SIZE, new Position(x, y), TYPE);
+    }
+
+    @Override
+    public Position getPos() {
+        // Return a new Position to protect internal state, if Position is mutable
+        return new Position(pos.getX(), pos.getY());
+    }
+
+    @Override
+    public boolean isBottomless() {
+        return false;
+    }
+}
+
+
+//
+//
+//
+//package wethinkcode.robotworlds.Server.obstacles;
+//
+//import wethinkcode.robotworlds.Server.world.Position;
+//
+//public class Lake implements Obstacle {
+//    private final Position topLeft;
+//    private final Position bottomRight;
+//
+//    public Lake(Position topLeft, Position bottomRight) {
+//        this.topLeft = topLeft;
+//        this.bottomRight = bottomRight;
+//    }
+//
+//    public Lake(int i, int i1, int i2, int i3, Position topLeft, Position bottomRight) {
+//        this.topLeft = topLeft;
+//        this.bottomRight = bottomRight;
+//    }
+//
+//    @Override
+//    public int getTopLeftX() {
+//        return topLeft.getX();
+//    }
+//
+//    @Override
+//    public int getTopLeftY() {
+//        return topLeft.getY();
+//    }
+//
+//    @Override
+//    public int getBottomRightX() {
+//        return bottomRight.getX();
+//    }
+//
+//    @Override
+//    public int getBottomRightY() {
+//        return bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPosition(Position position) {
+//        return position.getX() >= topLeft.getX() && position.getX() <= bottomRight.getX() &&
+//                position.getY() >= topLeft.getY() && position.getY() <= bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPath(Position a, Position b) {
+//        if (a.getX() == b.getX()) { // Vertical path
+//            int x = a.getX();
+//            int minY = Math.min(a.getY(), b.getY());
+//            int maxY = Math.max(a.getY(), b.getY());
+//            return x >= topLeft.getX() && x <= bottomRight.getX() &&
+//                    minY <= bottomRight.getY() && maxY >= topLeft.getY();
+//        } else if (a.getY() == b.getY()) { // Horizontal path
+//            int y = a.getY();
+//            int minX = Math.min(a.getX(), b.getX());
+//            int maxX = Math.max(a.getX(), b.getX());
+//            return y >= topLeft.getY() && y <= bottomRight.getY() &&
+//                    minX <= bottomRight.getX() && maxX >= topLeft.getX();
+//        }
+//        return false;
+//    }
+//
+//    @Override
+//    public boolean canSeeThrough() {
+//        return true;
+//    }
+//
+//    @Override
+//    public boolean canMoveThrough() {
+//        return false;
+//    }
+//}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/obstacle/MountainObstacle.java -----
+//package za.co.wethinkcode.robots.server;
+//
+//public class MountainObstacle {
+//}
+
+
+//import robotworld.server.world.Position;
+
+//package za.co.wethinkcode.robots.server;
+//
+//public class MountainObstacle extends Obstacle {
+//
+//    public MountainObstacle(int x, int y) {
+//        super(7, new Position(x, y), "Mountain");
+//    }
+//
+//    public za.co.wethinkcode.robots.robot.Position getPos() {
+//        return pos;
+//    }
+//
+//    public boolean isBottomless() {
+//        return false;
+//    }
+//
+//
+//}
+
+
+
+package za.co.wethinkcode.robots.server.world.obstacle;
+
+public class MountainObstacle extends Obstacle {
+
+    public MountainObstacle(int x, int y) {
+        super(7, new Position(x, y), "Mountain");
+    }
+
+    @Override
+    public Position getPos() {
+        return pos; // or simply return pos; if pos is protected
+    }
+
+    @Override
+    public boolean isBottomless() {
+        return false;
+    }
+
+
+//    @Override
+//    public Position getPos() {
+//        return pos;
+//    }
+//
+//    @Override
+//    public boolean isBottomless() {
+//        return true;
+//    }
+
+
+}
+
+
+
+//
+//package wethinkcode.robotworlds.Server.obstacles;
+//
+//import wethinkcode.robotworlds.Server.world.Position;
+//
+//public class Mountain implements Obstacle {
+//    private final Position topLeft;
+//    private final Position bottomRight;
+//
+//    public Mountain(Position topLeft, Position bottomRight) {
+//        this.topLeft = topLeft;
+//        this.bottomRight = bottomRight;
+//    }
+//
+//    @Override
+//    public int getTopLeftX() {
+//        return topLeft.getX();
+//    }
+//
+//    @Override
+//    public int getTopLeftY() {
+//        return topLeft.getY();
+//    }
+//
+//    @Override
+//    public int getBottomRightX() {
+//        return bottomRight.getX();
+//    }
+//
+//    @Override
+//    public int getBottomRightY() {
+//        return bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPosition(Position position) {
+//        return position.getX() >= topLeft.getX() && position.getX() <= bottomRight.getX() &&
+//                position.getY() >= topLeft.getY() && position.getY() <= bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPath(Position a, Position b) {
+//        if (a.getX() == b.getX()) { // Vertical path
+//            int x = a.getX();
+//            int minY = Math.min(a.getY(), b.getY());
+//            int maxY = Math.max(a.getY(), b.getY());
+//            return x >= topLeft.getX() && x <= bottomRight.getX() &&
+//                    minY <= bottomRight.getY() && maxY >= topLeft.getY();
+//        } else if (a.getY() == b.getY()) { // Horizontal path
+//            int y = a.getY();
+//            int minX = Math.min(a.getX(), b.getX());
+//            int maxX = Math.max(a.getX(), b.getX());
+//            return y >= topLeft.getY() && y <= bottomRight.getY() &&
+//                    minX <= bottomRight.getX() && maxX >= topLeft.getX();
+//        }
+//        return false;
+//    }
+//
+//    @Override
+//    public boolean canSeeThrough() {
+//        return false;
+//    }
+//
+//    @Override
+//    public boolean canMoveThrough() {
+//        return false;
+//    }
+//}
+
+
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/obstacle/Position.java -----
+//package za.co.wethinkcode.robots.server;
+//
+//public class Position {
+//}
+
+
+package za.co.wethinkcode.robots.server.world.obstacle;
+
+import java.util.Objects;
+
+public class Position {
+    private final int x;
+    private final int y;
+
+    public Position(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    public int getX() {
+        return x;
+    }
+
+    public int getY() {
+        return y;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+
+        Position position = (Position) o;
+
+        if (x != position.x)
+            return false;
+        return y == position.y;
+    }
+
+    public boolean isIn(Position topLeft, Position bottomRight) {
+        boolean withinTop = this.y <= topLeft.getY();
+        boolean withinBottom = this.y >= bottomRight.getY();
+        boolean withinLeft = this.x >= topLeft.getX();
+        boolean withinRight = this.x <= bottomRight.getX();
+        return withinTop && withinBottom && withinLeft && withinRight;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(x, y);
+    }
+
+    public Object toJsonArray() {
+        return null;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/obstacle/Bottomless.java -----
+//package za.co.wethinkcode.robots.server;
+//
+//public class Bottomless {
+//}
+
+//import robotworld.server.world.Position;
+
+
+package za.co.wethinkcode.robots.server.world.obstacle;
+
+
+public class Bottomless extends Obstacle{
+
+    public Bottomless(int x, int y){
+        super(9, new Position(x, y), "Bottomless");
+    }
+
+    @Override
+    public int getSize() {
+        return this.size;
+    }
+
+    @Override
+    public int getBottomLeftX() {
+        return pos.getX();
+    }
+
+    @Override
+    public int getBottomLeftY() {
+        return pos.getY();
+    }
+
+    public Position getPos() {
+        return pos;
+    }
+
+    public boolean isBottomless(){
+        return true;
+    }
+}
+
+
+
+//
+//package wethinkcode.robotworlds.Server.obstacles;
+//
+//import wethinkcode.robotworlds.Server.world.Position;
+//
+//public class BottomlessPit implements Obstacle {
+//    private final Position topLeft;
+//    private final Position bottomRight;
+//
+//    public BottomlessPit(Position topLeft, Position bottomRight) {
+//        this.topLeft = topLeft;
+//        this.bottomRight = bottomRight;
+//    }
+//
+//    @Override
+//    public int getTopLeftX() {
+//        return topLeft.getX();
+//    }
+//
+//    @Override
+//    public int getTopLeftY() {
+//        return topLeft.getY();
+//    }
+//
+//    @Override
+//    public int getBottomRightX() {
+//        return bottomRight.getX();
+//    }
+//
+//    @Override
+//    public int getBottomRightY() {
+//        return bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPosition(Position position) {
+//        /*There shouldn't be a blocks position method*/
+//        return position.getX() >= topLeft.getX() && position.getX() <= bottomRight.getX() &&
+//                position.getY() >= topLeft.getY() && position.getY() <= bottomRight.getY();
+//    }
+//
+//    @Override
+//    public boolean blocksPath(Position a, Position b) {
+//        if (a.getX() == b.getX()) { // Vertical path
+//            int x = a.getX();
+//            int minY = Math.min(a.getY(), b.getY());
+//            int maxY = Math.max(a.getY(), b.getY());
+//            return x >= topLeft.getX() && x <= bottomRight.getX() &&
+//                    minY <= bottomRight.getY() && maxY >= topLeft.getY();
+//        } else if (a.getY() == b.getY()) { // Horizontal path
+//            int y = a.getY();
+//            int minX = Math.min(a.getX(), b.getX());
+//            int maxX = Math.max(a.getX(), b.getX());
+//            return y >= topLeft.getY() && y <= bottomRight.getY() &&
+//                    minX <= bottomRight.getX() && maxX >= topLeft.getX();
+//        }
+//        return false;
+//    }
+//
+//    @Override
+//    public boolean canSeeThrough() {
+//        return true;
+//    }
+//
+//    @Override
+//    public boolean canMoveThrough() {
+//        return false;
+//    }
+//
+//    public boolean isFatal() {
+//        return true;
+//    }
+//}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/worldconfiguration/WorldConfig.java -----
+package za.co.wethinkcode.robots.server.world.worldconfiguration;
+
+
+public class WorldConfig {
+    private int width;
+    private int height;
+    private int numberOfObstacles;
+    private int visibility;
+    private String make;
+
+
+
+    // Getters and Setters
+    public int getWidth() {
+        return width;
+    }
+
+    public void setWidth(int width) {
+        this.width = width;
+    }
+
+    public int getHeight() {
+        return height;
+    }
+
+    public void setHeight(int height) {
+        this.height = height;
+    }
+
+    public int getNumberOfObstacles() {
+        return numberOfObstacles;
+    }
+
+    public void setNumberOfObstacles(int numberOfObstacles) {
+        this.numberOfObstacles = numberOfObstacles;
+    }
+
+    public int getVisibility() {
+        return visibility;
+    }
+
+    public void setVisibility(int visibility) {
+        this.visibility = visibility;
+    }
+
+
+    public int getReloadTime() {
+        return 0;
+    }
+
+    public int getMaxShieldStrength() {
+        return 0;
+    }
+
+    public int getRepairTime() {
+        return 0;
+    }
+
+    public String getMake() {
+        return make;
+    }
+
+    public void setMake(String make) {
+        this.make = make;
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/worldconfiguration/Visibility.java -----
+package za.co.wethinkcode.robots.server.world.worldconfiguration;
+
+import za.co.wethinkcode.robots.server.world.obstacle.*;
+
+import java.util.*;
+
+public class Visibility {
+    private final int maxRange;
+
+    public Visibility(int maxRange) {
+        this.maxRange = maxRange;
+    }
+
+    public Map<String, List<Obstacle>> getVisibleObstacles(Position robotPos, Set<Obstacle> allObstacles) {
+        Map<String, List<Obstacle>> visibilityMap = new HashMap<>();
+        for (String dir : List.of("N", "S", "E", "W")) {
+            visibilityMap.put(dir, getInDirection(robotPos, dir, allObstacles));
+        }
+        return visibilityMap;
+    }
+
+    private List<Obstacle> getInDirection(Position pos, String direction, Set<Obstacle> obstacles) {
+        List<Obstacle> visible = new ArrayList<>();
+        int dx = 0, dy = 0;
+
+        switch (direction.toUpperCase()) {
+            case "N" -> dy = 1;
+            case "S" -> dy = -1;
+            case "E" -> dx = 1;
+            case "W" -> dx = -1;
+        }
+
+        int x = pos.getX();
+        int y = pos.getY();
+
+        for (int i = 1; i <= maxRange; i++) {
+            x += dx;
+            y += dy;
+            Position check = new Position(x, y);
+
+            for (Obstacle obstacle : obstacles) {
+                if (obstacle.blocksPath(check)) {
+                    visible.add(obstacle);
+                    if (obstacle instanceof MountainObstacle) {
+                        return visible;
+                    }
+                    break;
+                }
+            }
+        }
+        return visible;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/world/worldconfiguration/ConfigLoader.java -----
+package za.co.wethinkcode.robots.server.world.worldconfiguration;
+
+
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.File;
+import java.io.IOException;
+
+public class ConfigLoader {
+
+    public static WorldConfig loadWorldConfig(String filePath) throws IOException {
+        // Create an ObjectMapper instance
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        // Read the JSON file and map it to the WorldConfig class
+        return objectMapper.readValue(new File(filePath), WorldConfig.class);
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/MultiServer.java -----
+package za.co.wethinkcode.robots.server;
+
+import za.co.wethinkcode.robots.client.ClientHandler;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class MultiServer {
+    public static final int PORT = 5000;
+    private static final ConcurrentHashMap<String, Robot> robots = new ConcurrentHashMap<>();
+
+    private ServerSocket serverSocket;
+    private boolean running = false;
+    private final World world = new World(100, 100);
+
+    public void start() throws IOException {
+        serverSocket = new ServerSocket(PORT);
+        running = true;
+        System.out.println("Server running on port " + PORT);
+
+        while (running) {
+            try {
+                Socket socket = serverSocket.accept();
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintStream out = new PrintStream(socket.getOutputStream());
+
+                out.println("Enter your robot's name:");
+                String robotName = in.readLine();
+                if (robotName == null || robotName.trim().isEmpty()) {
+                    robotName = "Unnamed Robot";
+                }
+
+                Robot robot = new Robot(robotName, world);
+                robots.put(robotName, robot);
+
+                Runnable handler = new ClientHandler(socket, robot, world, robots);
+                new Thread(handler).start();
+            } catch (IOException e) {
+                if (running) {
+                    System.err.println("Server error: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    public void stop() {
+        running = false;
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static ConcurrentHashMap<String, Robot> getRobots() {
+        return robots;
+    }
+
+    public static void main(String[] args) {
+        MultiServer server = new MultiServer();
+        try {
+            server.start();
+        } catch (IOException e) {
+            System.err.println("Failed to start server: " + e.getMessage());
+        }
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/robot/Robot.java -----
+package za.co.wethinkcode.robots.server.robot;
+
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+import za.co.wethinkcode.robots.server.world.obstacle.Position;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+public class Robot {
+    private final String name;
+    private int x = 0, y = 0;
+    private String direction = "NORTH";
+
+    private int shieldStrength;
+    private int maxShieldStrength;
+    private int ammo;
+    private int fireRange;
+    private String make;
+
+    private boolean isReloading = false;
+    private boolean isRepairing = false;
+
+    public Robot(String name, World world) {
+        this.name = name;
+        this.make = world.getMake();
+        this.maxShieldStrength = world.getMaxShieldStrength();
+        this.shieldStrength = maxShieldStrength;
+        this.ammo = 3; // You can make this configurable too
+        this.fireRange = 5; // Can be made configurable
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getStatus() {
+        return String.format("%s at (%d,%d) facing %s | Shields: %d | Ammo: %d",
+                name, x, y, direction, shieldStrength, ammo);
+    }
+
+    public boolean forward(int steps, World world) {
+        return move(steps, world);
+    }
+
+    public boolean back(int steps, World world) {
+        return move(-steps, world);
+    }
+
+    private boolean move(int steps, World world) {
+        int newX = x;
+        int newY = y;
+
+        for (int i = 0; i < Math.abs(steps); i++) {
+            switch (direction) {
+                case "NORTH" -> newY += Integer.signum(steps);
+                case "SOUTH" -> newY -= Integer.signum(steps);
+                case "EAST"  -> newX += Integer.signum(steps);
+                case "WEST"  -> newX -= Integer.signum(steps);
+            }
+
+            Position newPos = new Position(newX, newY);
+
+            if (!world.isInsideWorld(newPos) || world.isPositionBlocked(newPos)) {
+                return false; // Can't move further
+            }
+
+            x = newX;
+            y = newY;
+        }
+
+        return true;
+    }
+
+    public void turnRight() {
+        direction = switch (direction) {
+            case "NORTH" -> "EAST";
+            case "EAST"  -> "SOUTH";
+            case "SOUTH" -> "WEST";
+            case "WEST"  -> "NORTH";
+            default      -> direction;
+        };
+    }
+
+    public void turnLeft() {
+        direction = switch (direction) {
+            case "NORTH" -> "WEST";
+            case "WEST"  -> "SOUTH";
+            case "SOUTH" -> "EAST";
+            case "EAST"  -> "NORTH";
+            default      -> direction;
+        };
+    }
+
+    public FireResult fire(World world) {
+        if (ammo <= 0) {
+            return new FireResult(false, null, 0);
+        }
+
+        ammo--;
+
+        int dx = 0, dy = 0;
+        switch (direction) {
+            case "NORTH" -> dy = 1;
+            case "SOUTH" -> dy = -1;
+            case "EAST"  -> dx = 1;
+            case "WEST"  -> dx = -1;
+        }
+
+        int currX = x;
+        int currY = y;
+
+        for (int i = 1; i <= fireRange; i++) {
+            currX += dx;
+            currY += dy;
+            Position pos = new Position(currX, currY);
+
+            // Stop if outside world or blocked
+            if (!world.isInsideWorld(pos) || world.isPositionBlocked(pos)) {
+                break;
+            }
+
+            Robot hitRobot = world.getRobotAt(pos);
+            if (hitRobot != null && hitRobot != this) {
+                // Hit another robot
+                hitRobot.takeDamage(1); // Optional: reduce shield by 1
+                return new FireResult(true, hitRobot, i);
+            }
+        }
+
+        return new FireResult(false, null, 0);
+    }
+
+    public void reload(World world) {
+        this.ammo = 3; // Optionally pull from config
+        this.isReloading = true;
+        // Add cooldown delay logic elsewhere if needed
+    }
+
+    public boolean repair(World world) {
+        if (shieldStrength >= maxShieldStrength) return false;
+        shieldStrength = maxShieldStrength;
+        this.isRepairing = true;
+        return true;
+    }
+
+    public Position getCurrentPosition() {
+        return new Position(x, y);
+    }
+
+    public String getDirection() {
+        return direction;
+    }
+
+    public int getShieldStrength() {
+        return shieldStrength;
+    }
+
+    public int getAmmo() {
+        return ammo;
+    }
+
+    public int getFireRange() {
+        return fireRange;
+    }
+
+    public boolean isReloading() {
+        return isReloading;
+    }
+
+    public boolean isRepairing() {
+        return isRepairing;
+    }
+
+    public void setPosition(Position position) {
+    }
+
+    public void setDirection(String north) {
+    }
+
+    public void setShieldStrength(int min) {
+    }
+
+    public void setMaxShieldStrength(int min) {
+    }
+
+    public void setShots(int maxShots) {
+    }
+
+    public void setMaxShots(int maxShots) {
+    }
+
+    public void setStatus(String normal) {
+    }
+
+    public Object getShots() {
+        return null;
+    }
+
+    public Position getPosition() {
+        return null;
+    }
+
+    public Object getCurrentDirection() {
+        return null;
+    }
+
+    public Object getShields() {
+        return null;
+    }
+
+    public static class FireResult {
+        private final boolean hit;
+        private final Robot target;
+        private final int distance;
+
+        public FireResult(boolean hit, Robot target, int distance) {
+            this.hit = hit;
+            this.target = target;
+            this.distance = distance;
+        }
+
+        public boolean didHit() { return hit; }
+        public Robot getTarget() { return target; }
+        public int getDistance() { return distance; }
+    }
+
+    public void takeDamage(int amount) {
+        this.shieldStrength = Math.max(0, shieldStrength - amount);
+    }
+
+    public Map<String, Object> getState() {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("position", List.of(x, y));
+        state.put("direction", direction);
+        state.put("shields", shieldStrength);
+        state.put("ammo", ammo);
+        return state;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/robot/RobotRegistry.java -----
+package za.co.wethinkcode.robots.server.robot;
+
+
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+public class RobotRegistry {
+    private static final List<Robot> allRobots = new ArrayList<>();
+
+    public static void registerRobot(Robot robot) {
+        allRobots.add(robot);
+    }
+
+    public static List<Robot> getAllRobots() {
+        return Collections.unmodifiableList(allRobots);
+    }
+
+    public static boolean containsRobot(String name) {
+        return false;
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/server/Server.java -----
+package za.co.wethinkcode.robots.server;
+
+import za.co.wethinkcode.flow.Recorder;
+
+public class Server {
+
+    public static void main(String[] args){
+        throw new UnsupportedOperationException( "TODO" );
+    }
+
+    // The following initialisation is REQUIRED for `flow` monitoring.
+    // DO NOT REMOVE OR MODIFY THIS CODE.
+    static {
+        new Recorder().logRun();
+    }
+
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/client/ClientHandler.java -----
+package za.co.wethinkcode.robots.client;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.commands.Command;
+import za.co.wethinkcode.robots.commands.CommandFactory;
+import za.co.wethinkcode.robots.server.robot.RobotRegistry;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+import java.io.*;
+import java.net.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class ClientHandler implements Runnable {
+    private final Socket socket;
+    private final BufferedReader in;
+    private final PrintStream out;
+    private final Robot robot;
+    private final World world;
+
+    public ClientHandler(Socket socket, Robot robot, World world, ConcurrentHashMap<String, Robot> robots) throws IOException {
+        this.socket = socket;
+        this.robot = robot;
+        this.world = world;
+        this.in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        this.out = new PrintStream(socket.getOutputStream());
+
+        // ✅ Register the robot in the shared registry
+        RobotRegistry.registerRobot(robot);
+    }
+
+    @Override
+    public void run() {
+        try {
+            out.println("Welcome!! Robot " + robot.getName() + " connected successfully!");
+            String line;
+            while ((line = in.readLine()) != null) {
+                String response = handleCommand(line.trim());
+                out.println(response);
+            }
+        } catch (IOException e) {
+            System.out.println("Goodbye: Robot " + robot.getName() + " disconnected.");
+        } finally {
+            close();
+        }
+    }
+
+    private String handleCommand(String cmd) {
+        if ("quit".equalsIgnoreCase(cmd)) {
+            close();
+            return "Goodbye from " + robot.getName();
+        }
+
+        Command command = CommandFactory.getCommand(cmd);
+        if (command != null) {
+            return command.execute(robot, world);
+        } else {
+            return "Unknown command: " + cmd;
+        }
+    }
+
+    private void close() {
+        try {
+            socket.close();
+        } catch (IOException ignored) {}
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/client/Client.java -----
+//package client;
+//
+//import java.io.*;
+//import java.net.*;
+//import java.util.Scanner;
+//
+//public class Client {
+//    public static void main(String[] args) {
+//        try (
+//                Socket socket = new Socket("localhost", 5000);
+//                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+//                PrintStream out = new PrintStream(socket.getOutputStream());
+//                Scanner scanner = new Scanner(System.in)
+//        ) {
+//            System.out.println("Server: " + in.readLine());  // Welcome message
+//            String command;
+//            while (true) {
+//                System.out.print("Command: ");
+//                command = scanner.nextLine();
+//                out.println(command);
+//                out.flush();
+//
+//                if (command.equalsIgnoreCase("quit")) break;
+//
+//                String response = in.readLine();
+//                System.out.println("Server: " + response);
+//            }
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+//    }
+//}
+package za.co.wethinkcode.robots.client;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintStream;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.util.Scanner;
+
+public class Client {
+    public static void main(String[] args) {
+        try (
+                Socket socket = new Socket("localhost", 5000);
+                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                PrintStream out = new PrintStream(socket.getOutputStream());
+                Scanner scanner = new Scanner(System.in)
+        ) {
+            String serverMessage = in.readLine();
+            if (serverMessage == null) {
+                System.err.println("Connection closed by server.");
+                return;
+            }
+            System.out.println("Server: " + serverMessage);  // Welcome message
+
+            String command;
+            while (true) {
+                System.out.print("Command: ");
+                command = scanner.nextLine();
+                out.println(command);
+                out.flush();
+
+                if (command.equalsIgnoreCase("quit")) break;
+
+                String response = in.readLine();
+                if (response == null) {
+                    System.err.println("Connection closed by server.");
+                    break;
+                }
+                System.out.println("Server: " + response);
+            }
+        } catch (UnknownHostException e) {
+            System.err.println("Unknown host: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("I/O error: " + e.getMessage());
+        }
+    }
+}
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/Command.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public interface Command {
+    String execute(Robot robot, World world);
+
+    boolean shouldContinue();
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/FireCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+public class FireCommand implements Command {
+
+    public FireCommand() {
+        // No arguments needed for this command
+    }
+
+    @Override
+    public String execute(Robot robot, World world) {
+        if (robot.getAmmo() <= 0) {
+            return toJson("ERROR", Map.of("message", "No ammo left"), Map.of("shots", robot.getAmmo()));
+        }
+
+        Robot.FireResult result = robot.fire(world);  // Make sure this method and FireResult exist
+
+        if (result.didHit()) {
+            Robot target = result.getTarget();
+            int distance = result.getDistance();
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("message", "Hit");
+            data.put("distance", distance);
+            data.put("robot", target.getName());
+            data.put("state", target.getState());  // Make sure getState() returns a Map<String, Object>
+
+            Map<String, Object> state = Map.of("shots", robot.getAmmo());
+
+            return toJson("OK", data, state);
+        } else {
+            Map<String, Object> data = Map.of("message", "Miss");
+            Map<String, Object> state = Map.of("shots", robot.getAmmo());
+
+            return toJson("OK", data, state);
+        }
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+
+    private String toJson(String result, Map<String, Object> data, Map<String, Object> state) {
+        return String.format(
+                "{\"result\": \"%s\", \"data\": %s, \"state\": %s}",
+                result, toJsonObject(data), toJsonObject(state)
+        );
+    }
+
+    private String toJsonObject(Map<String, Object> map) {
+        StringBuilder json = new StringBuilder("{");
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            json.append("\"").append(entry.getKey()).append("\": ");
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                json.append("\"").append(value).append("\"");
+            } else if (value instanceof Map) {
+                json.append(toJsonObject((Map<String, Object>) value));
+            } else {
+                json.append(value);
+            }
+            json.append(", ");
+        }
+        if (json.length() > 1) json.setLength(json.length() - 2); // Trim trailing comma
+        json.append("}");
+        return json.toString();
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/DumpCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class DumpCommand implements Command {
+    @Override
+    public String execute(Robot robot, World world) {
+        return "World: " + world.getWidth() + "x" + world.getHeight()
+                + ", Obstacles: " + world.getObstacles().size();
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/ForwardCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class ForwardCommand implements Command {
+    private final int steps;
+
+    public ForwardCommand(String input) {
+        this.steps = parseSteps(input);
+    }
+
+    private int parseSteps(String input) {
+        try {
+            String[] parts = input.trim().split(" ");
+            return Integer.parseInt(parts[1]);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    @Override
+    public String execute(Robot robot, World world) {
+        if (steps <= 0) {
+            return "Invalid step count.";
+        }
+
+        boolean moved = robot.forward(steps, world);
+        if (moved) {
+            return robot.getName() + " moved forward " + steps + " steps to " + robot.getCurrentPosition();
+        } else {
+            return robot.getName() + " cannot move forward " + steps + " steps. Obstacle or boundary ahead.";
+        }
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/RepairCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+
+
+
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class RepairCommand implements Command {
+
+    @Override
+    public String execute(Robot robot, World world) {
+        // Attempt to repair the robot
+        boolean repairSuccess = robot.repair(world);
+
+        // Return the appropriate response based on whether the repair was successful
+        if (repairSuccess) {
+            return buildRepairResponse(robot);
+        } else {
+            return buildNoRepairNeededResponse();
+        }
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+
+    private String buildRepairResponse(Robot robot) {
+        return String.format(
+                "{\n" +
+                        "  \"result\": \"OK\",\n" +
+                        "  \"data\": {\n" +
+                        "    \"message\": \"Done\"\n" +
+                        "  },\n" +
+                        "  \"state\": {\n" +
+                        "    \"status\": \"REPAIR\",\n" +
+                        "    \"shieldStrength\": %d\n" +
+                        "  }\n" +
+                        "}",
+                robot.getShieldStrength() // Returns the updated shield strength
+        );
+    }
+
+    private String buildNoRepairNeededResponse() {
+        return "{\n" +
+                "  \"result\": \"OK\",\n" +
+                "  \"data\": {\n" +
+                "    \"message\": \"No repair needed\"\n" +
+                "  },\n" +
+                "  \"state\": {\n" +
+                "    \"status\": \"REPAIR\"\n" +
+                "  }\n" +
+                "}";
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/TurnCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class TurnCommand implements Command {
+    private final String direction;
+
+    public TurnCommand(String input) {
+        this.direction = parseDirection(input);
+    }
+
+    private String parseDirection(String input) {
+        try {
+            String[] parts = input.trim().split(" ");
+            if (parts.length < 2) return "";
+            return parts[1].toLowerCase();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    @Override
+    public String execute(Robot robot, World world) {
+        return switch (direction) {
+            case "left" -> {
+                robot.turnLeft();
+                yield robot.getName() + " turned left.";
+            }
+            case "right" -> {
+                robot.turnRight();
+                yield robot.getName() + " turned right.";
+            }
+            default -> "Invalid turn direction. Use 'turn left' or 'turn right'.";
+        };
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/RobotsCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+
+
+import za.co.wethinkcode.robots.server.robot.RobotRegistry;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class RobotsCommand implements Command {
+    @Override
+    public String execute(Robot robot, World world) {
+        return RobotRegistry.getAllRobots()
+                .stream()
+                .map(Robot::getName)
+                .toList()
+                .toString();
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/LaunchCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import org.json.simple.JSONObject;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.robot.RobotRegistry;
+import za.co.wethinkcode.robots.server.world.obstacle.Position;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class LaunchCommand implements Command {
+    private final String make;
+    private final int shieldStrength;
+    private final int maxShots;
+
+    public LaunchCommand(String make, int shieldStrength, int maxShots) {
+        this.make = make;
+        this.shieldStrength = shieldStrength;
+        this.maxShots = maxShots;
+    }
+
+    @Override
+    public String execute(Robot robot, World world) {
+        JSONObject response = new JSONObject();
+        JSONObject data = new JSONObject();
+        JSONObject state = new JSONObject();
+
+        if (RobotRegistry.containsRobot(robot.getName())) {
+            response.put("result", "ERROR");
+            data.put("message", "Too many of you in this world");
+            response.put("data", data);
+            return response.toJSONString();
+        }
+
+        Position position = world.findFreePosition();
+        if (position == null) {
+            response.put("result", "ERROR");
+            data.put("message", "No more space in this world");
+            response.put("data", data);
+            return response.toJSONString();
+        }
+
+        robot.setPosition(position);
+        robot.setDirection("NORTH");
+        robot.setShieldStrength(Math.min(shieldStrength, world.getMaxShieldStrength()));
+        robot.setMaxShieldStrength(Math.min(shieldStrength, world.getMaxShieldStrength()));
+        robot.setShots(maxShots);
+        robot.setMaxShots(maxShots);
+        robot.setStatus("NORMAL");
+
+        // Build data section
+        data.put("position", position.toJsonArray());
+        data.put("visibility", world.getVisibility());
+        data.put("reload", world.getReloadTime());
+        data.put("repair", world.getRepairTime());
+        data.put("shields", robot.getShieldStrength());
+
+        // Build state section
+        state.put("position", position.toJsonArray());
+        state.put("direction", "NORTH");
+        state.put("shields", robot.getShieldStrength());
+        state.put("shots", robot.getShots());
+        state.put("status", "NORMAL");
+
+        response.put("result", "OK");
+        response.put("data", data);
+        response.put("state", state);
+
+        RobotRegistry.registerRobot(robot);
+        return response.toJSONString();
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/CommandFactory.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class CommandFactory {
+    private static World world;
+
+    public static void init(World worldInstance) {
+        world = worldInstance;
+    }
+
+    public static Command getCommand(String input) {
+        if (input == null || input.isBlank()) return null;
+
+        String[] parts = input.trim().split("\\s+");
+        String commandName = parts[0].toLowerCase();
+
+        try {
+            return switch (commandName) {
+                case "forward" -> new ForwardCommand(input);
+                case "back"    -> new BackCommand(input);
+                case "fire"    -> new FireCommand();
+                case "launch"  -> new LaunchCommand(world.getMake(), world.getMaxShieldStrength(), 5); // Assuming 5 shots
+                case "reload"  -> new ReloadCommand();
+                case "repair"  -> new RepairCommand();
+                case "turn"    -> new TurnCommand(input);
+                default        -> null;
+            };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/LookCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+import za.co.wethinkcode.robots.server.world.obstacle.Position;
+import za.co.wethinkcode.robots.server.world.obstacle.Obstacle;
+
+import java.util.List;
+import java.util.Map;
+
+public class LookCommand implements Command {
+
+    @Override
+    public String execute(Robot robot, World world) {
+        JSONObject response = new JSONObject();
+
+        // Use the visibility system to get visible obstacles
+        Map<String, List<Obstacle>> visibleObstacles = world.getVisibleObstacles(robot.getCurrentPosition());
+
+        // Build the 'objects' array
+        JSONArray objectsArray = new JSONArray();
+        for (Map.Entry<String, List<Obstacle>> entry : visibleObstacles.entrySet()) {
+            String direction = entry.getKey();
+            List<Obstacle> obstaclesInDirection = entry.getValue();
+
+            for (Obstacle obstacle : obstaclesInDirection) {
+                JSONObject obj = new JSONObject();
+                obj.put("direction", direction);
+                obj.put("type", obstacle.getName());
+                obj.put("distance", calculateDistance(robot.getCurrentPosition(), obstacle.getPos()));
+                objectsArray.add(obj);
+            }
+        }
+
+        // Create the 'data' JSON
+        JSONObject data = new JSONObject();
+        data.put("objects", objectsArray);
+
+        // Create the 'state' JSON
+        JSONObject state = new JSONObject();
+        JSONArray position = new JSONArray();
+        position.add(robot.getCurrentPosition().getX());
+        position.add(robot.getCurrentPosition().getY());
+
+        state.put("position", position);
+        state.put("direction", robot.getCurrentDirection().toString());
+        state.put("shields", robot.getShields());
+        state.put("shots", robot.getShots());
+        state.put("status", robot.getStatus().toString());
+
+        // Combine final response
+        response.put("result", "OK");
+        response.put("data", data);
+        response.put("state", state);
+
+        return response.toJSONString();
+    }
+
+    private int calculateDistance(Position from, Position to) {
+        int dx = Math.abs(to.getX() - from.getX());
+        int dy = Math.abs(to.getY() - from.getY());
+        return dx + dy; // Manhattan distance (suitable for grid-based world)
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return true;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/ReloadCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class ReloadCommand implements Command {
+
+    @Override
+    public String execute(Robot robot, World world) {
+        // Reload the robot's ammo
+        robot.reload(world);
+
+        // Create the response message for the reload action
+        return buildReloadResponse(robot);
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+
+    private String buildReloadResponse(Robot robot) {
+        return String.format(
+                "{\n" +
+                        "  \"result\": \"OK\",\n" +
+                        "  \"data\": {\n" +
+                        "    \"message\": \"Done\"\n" +
+                        "  },\n" +
+                        "  \"state\": {\n" +
+                        "    \"status\": \"RELOAD\",\n" +
+                        "    \"ammo\": %d\n" +
+                        "  }\n" +
+                        "}",
+                robot.getAmmo() // Returns the updated ammo count
+        );
+    }
+}
+
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/HelpCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.commands.Command;
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class HelpCommand implements Command {
+    @Override
+    public String execute(Robot robot, World world) {
+        return """
+            === Available Commands ===
+            HELP       - Show this list of available commands.
+            FORWARD    - Move the robot forward.
+            BACK       - Move the robot backward.
+            LEFT       - Turn the robot to the left.
+            RIGHT      - Turn the robot to the right.
+            LOOK       - Scan the surroundings.
+            FIRE       - Attack with your weapon.
+            REPAIR     - Repair your robot.
+            RELOAD     - Reload your weapon.
+            SHIELD     - Activate your defense shield.
+            STATE      - Display current robot status.
+            QUIT       - Exit the game.
+            ==========================
+            """;
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/CommandParser.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class CommandParser {
+
+    // Method to parse and execute commands
+    public static String parseAndExecute(String input, Robot robot, World world) {
+        // Get the command from CommandFactory
+        Command command = CommandFactory.getCommand(input);
+
+        if (command != null) {
+            // Execute the command and return the response
+            return command.execute(robot, world);
+        } else {
+            // If no valid command is found, return an error message
+            return buildInvalidCommandResponse(input);
+        }
+    }
+
+    // Method to build the response for an invalid command
+    private static String buildInvalidCommandResponse(String input) {
+        return "{\n" +
+                "  \"result\": \"ERROR\",\n" +
+                "  \"data\": {\n" +
+                "    \"message\": \"Invalid command: " + input + "\"\n" +
+                "  }\n" +
+                "}";
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/StateCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONArray;
+
+public class StateCommand implements Command {
+
+    @Override
+    public String execute(Robot robot, World world) {
+        // Build position array
+        JSONArray position = new JSONArray();
+        position.add(robot.getPosition().getX());
+        position.add(robot.getPosition().getY());
+
+        // Build state object
+        JSONObject state = new JSONObject();
+        state.put("position", position);
+        state.put("direction", robot.getCurrentDirection().toString());
+        state.put("shields", robot.getShields());
+        state.put("shots", robot.getShots());
+        state.put("status", robot.getStatus().toString());
+
+        // Final response with only state key
+        JSONObject response = new JSONObject();
+        response.put("state", state);
+
+        return response.toJSONString();
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return true;
+    }
+}
+
+----- FILE: ./src/main/java/za/co/wethinkcode/robots/commands/BackCommand.java -----
+package za.co.wethinkcode.robots.commands;
+
+import za.co.wethinkcode.robots.server.robot.Robot;
+import za.co.wethinkcode.robots.server.world.AbstractIWorld;
+
+public class BackCommand implements Command {
+    private final int steps;
+
+    public BackCommand(String input) {
+        this.steps = parseSteps(input);
+    }
+
+    private int parseSteps(String input) {
+        try {
+            String[] parts = input.trim().split(" ");
+            return Integer.parseInt(parts[1]);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    @Override
+    public String execute(Robot robot, World world) {
+        if (steps <= 0) {
+            return "Invalid step count.";
+        }
+
+        boolean moved = robot.back(steps, world);
+        if (moved) {
+            return robot.getName() + " moved back " + steps + " steps to " + robot.getCurrentPosition();
+        } else {
+            return robot.getName() + " cannot move back " + steps + " steps. Obstacle or boundary behind.";
+        }
+    }
+
+    @Override
+    public boolean shouldContinue() {
+        return false;
+    }
+}

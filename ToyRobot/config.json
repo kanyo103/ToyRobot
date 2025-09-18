@@ -1,0 +1,31 @@
+{
+  "world": {
+    "width": 50,
+    "height": 50,
+    "numberOfObstacles": 20,
+    "visibility": 10,
+    "repairTime": 10,
+    "reloadTime": 5,
+    "maxShieldStrength": 7
+  },
+  "make": [
+    {
+      "name": "sniper",
+      "shieldStrength": 1,
+      "numShots": 2,
+      "shotDistance": 9
+    },
+    {
+      "name": "tank",
+      "shieldStrength": 7,
+      "numShots": 2,
+      "shotDistance": 3
+    },
+    {
+      "name": "explorer",
+      "shieldStrength": 4,
+      "numShots": 3,
+      "shotDistance": 5
+    }
+  ]
+}
