@@ -1,12 +1,6 @@
-# CPT 11 - Toy Robot World
+# Toy Robot World
 
 This project is made up of two main components: the Server and the Client. The Server is responsible for managing the virtual world, including its robots, obstacles, and other elements. The Client is used to launch a robot into that world and control its actions by sending commands to the Server and handling its responses.
-
-## Authors
-1) Karabo Lelaka 
-2) Ntlantla Mthobeli 
-3) Rushaan Swartbooi 
-4) Sinethemba Mapuceni
 
 ## How to run the project
 
@@ -113,7 +107,3 @@ You may use IntelliJ to run your code and tests, but alternatively you can use t
 - Architecture guidance from Multi-Client Server Guide
 - JSON serialization powered by Jackson Project
 - Special thanks to WeThinkCode_ peers for architectural reviews and code guidance.
-- ## Documentation
-- WIki documentation is available at [WeThinkCode_ Wiki](https://gitlab.wethinkco.de/kalelakcpt024/oop-ex-toy-robot-group/-/wikis/home)
-- Check out the project Wiki to learn more about how the system works and to get to know the team that developed it.
-
