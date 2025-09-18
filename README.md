@@ -7,7 +7,7 @@ This project is made up of two main components: the Server and the Client. The S
 #### Clone the Repository
 
 ```bash
-git clone 
+git clone git@github.com:kanyo103/ToyRobot.git
 ```
 ### Compile Code
 
