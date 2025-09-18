@@ -57,7 +57,7 @@ Features:
 
 🗂️ Project Structure
 
-oop-ex-toy-robot-group/
+toyrobot/
 ├── README.md
 ├── pom.xml
 ├── .lms/
