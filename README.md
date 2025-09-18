@@ -7,7 +7,7 @@ This project is made up of two main components: the Server and the Client. The S
 #### Clone the Repository
 
 ```bash
-git clone git@gitlab.wethinkco.de:kalelakcpt024/oop-ex-toy-robot-group.git
+git clone 
 ```
 ### Compile Code
 
