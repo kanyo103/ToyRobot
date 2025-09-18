@@ -60,8 +60,6 @@ Features:
 toyrobot/
 ├── README.md
 ├── pom.xml
-├── .lms/
-│   └── exercises.toml
 ├── src/
 │   ├── main/
 │   │   ├── java/
